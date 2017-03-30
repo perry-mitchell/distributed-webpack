@@ -22,28 +22,27 @@ function createWebpackText(start, end) {
     `;
 }
 
-function executeConfig(config, start, end) {
+function executeConfig(mainConfig, nodeConfig, start, end) {
     console.log(`Building project (${start}-${end})...`);
-    const cwd = getCurrentDir();
-    const { nodeType } = config;
+    const { nodeType, workingDir } = nodeConfig;
     if (nodeType === "local") {
-        return execa("mv", ["webpack.config.js", "original.webpack.config.js"], { cwd })
+        return execa("mv", ["webpack.config.js", "original.webpack.config.js"], { cwd: workingDir })
             .then(() => new Promise(function(resolve, reject) {
-                fs.writeFile(path.join(cwd, "webpack.config.js"), createWebpackText(start, end), function(err) {
+                fs.writeFile(path.join(workingDir, "webpack.config.js"), createWebpackText(start, end), function(err) {
                     if (err) {
                         return reject(err);
                     }
                     return resolve();
                 });
             }))
-            .then(() => execa("./node_modules/.bin/parallel-webpack", [], { cwd }));
+            .then(() => execa(mainConfig.webpack.buildCommand, mainConfig.webpack.buildArgs, { cwd: workingDir }));
     } else if (nodeType === "ssh") {
 
     }
     throw new Error(`Unknown node type: ${sendType}`);
 }
 
-function getConfigs() {
+function getConfig() {
     const cwd = getCurrentDir();
     return require(path.join(cwd, "./dist.webpack.config.js"));
 }
@@ -70,13 +69,14 @@ function installPackage(config) {
 }
 
 function performBuild() {
-    const configs = getConfigs();
+    const config = getConfig();
+    const nodeConfigs = config.nodes;
     const numItems = getScriptsCount();
-    const totalWeight = configs.reduce((running, next) => running + next, 0);
+    const totalWeight = nodeConfigs.reduce((running, next) => running + next.weight, 0);
     let itemsLeft = numItems,
         workNextIndex = 0;
-    const configWorkCount = configs.map(function(config) {
-        let percentage = config.weight / totalWeight,
+    const configWorkCount = nodeConfigs.map(function(nodeConfig) {
+        let percentage = nodeConfig.weight / totalWeight,
             count = Math.ceil(percentage * itemsLeft);
         if (count > itemsLeft) {
             count = itemsLeft
@@ -87,19 +87,19 @@ function performBuild() {
     console.log(`Artifacts: ${numItems}`);
     return archiveProject()
         .then(() => Promise
-            .all(configs.map(
-                config => processConfig(config)
-                    .then(() => installPackage(config))
+            .all(nodeConfigs.map(
+                nodeConfig => processConfig(nodeConfig)
+                    .then(() => installPackage(nodeConfig))
             ))
         )
         .then(removeArchive)
         .then(() => Promise
-            .all(configs.map(function(config, index) {
+            .all(nodeConfigs.map(function(nodeConfig, index) {
                 let count = configWorkCount[index],
                     first = workNextIndex,
                     last = first + count - 1;
                 workNextIndex = first + count;
-                return executeConfig(config, first, last);
+                return executeConfig(config, nodeConfig, first, last);
             }))
         );
 }
