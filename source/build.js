@@ -2,16 +2,33 @@ const path = require("path");
 const fs = require("fs");
 
 const execa = require("execa");
+const copy = require("copy");
+const pify = require("pify");
+
+const copyFiles = pify(copy);
 
 const FILTER_STDOUT = result => result.stdout;
 
 function archiveProject() {
     const cwd = getCurrentDir();
     console.log("Archiving project...");
-    return execa("zip", ["-r", "dist.zip", "./", "-x", "*node_modules*", "-x", "*.git*"], { cwd })
-        .then(function() {
-            console.log(" - Done");
-        });
+    return execa("zip", ["-r", "dist.zip", "./", "-x", "*node_modules*", "-x", "*.git*"], { cwd });
+}
+
+function copyRemoteArtifacts(nodeConfig) {
+    const { nodeType, artifacts } = nodeConfig;
+    if (artifacts && artifacts.length > 0) {
+        console.log("Copying build artifacts...");
+        if (nodeType === "local") {
+            return Promise
+                .all(artifacts.map(artifact =>
+                    copyFiles(artifact.remote, artifact.local)
+                ));
+        } else if (nodeType === "ssh") {
+
+        }
+    }
+    return Promise.resolve();
 }
 
 function createWebpackText(start, end) {
@@ -23,7 +40,7 @@ function createWebpackText(start, end) {
 }
 
 function executeConfig(mainConfig, nodeConfig, start, end) {
-    console.log(`Building project (${start}-${end})...`);
+    console.log(`Building project (${start} -> ${end})...`);
     const { nodeType, workingDir } = nodeConfig;
     if (nodeType === "local") {
         return execa("mv", ["webpack.config.js", "original.webpack.config.js"], { cwd: workingDir })
@@ -99,7 +116,8 @@ function performBuild() {
                     first = workNextIndex,
                     last = first + count - 1;
                 workNextIndex = first + count;
-                return executeConfig(config, nodeConfig, first, last);
+                return executeConfig(config, nodeConfig, first, last)
+                    .then(() => copyRemoteArtifacts(nodeConfig));
             }))
         );
 }
