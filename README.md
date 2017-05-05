@@ -31,6 +31,8 @@ distributed-webpack provides an executable called `distwp`, which is available i
 }
 ```
 
+Because distributed-webpack needs to process the webpack configuration **locally** before building remotely (to calculate work load), environment variables that are received by distributed-webpack **are also received by webpack itself**. When building remotely, however, you must provide the environment to webpack or major inconsistencies or errors may occur.
+
 ## Configuration
 Configuration of distributed-webpack is made by providing a `dist.webpack.config.js` file in the root directory of the project, alongside a `webpack.config.js` file for regular webpack execution. This new config file will house the definitions of the nodes (to perform building) and their weight (how much of the work will be performed on the node).
 
