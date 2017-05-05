@@ -92,7 +92,10 @@ The IP address or hostname of the remote machine to connect to. Required for `ss
 The SSH username to connect to the remote machine. Required for `ssh` node types.
 
 #### node.password
-The SSH password to authenticate the user with on the remote machine. May be required for `ssh` node types.
+The SSH password to authenticate the user with on the remote machine. May be required for `ssh` node types if `privateKey` is not specified.
+
+#### node.privateKey
+The SSH private key to use for authentication on the remote machine. Can either be an absolute path to the key or a string of the key itself.
 
 #### node.artifacts
 An array of built artifacts to be retrieved after building. This is an array of objects that resemble the following:

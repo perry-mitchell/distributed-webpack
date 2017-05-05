@@ -280,13 +280,18 @@ function performBuild() {
 
 function prepareSSH(nodeConfig) {
     const ssh = new NodeSSH();
+    const connectionInfo = {
+        host: nodeConfig.host,
+        username: nodeConfig.username,
+        keepaliveInterval: 10000
+    };
+    if (nodeConfig.password) {
+        connectionInfo.password = nodeConfig.password;
+    } else if (nodeConfig.privateKey) {
+        connectionInfo.privateKey = nodeConfig.privateKey;
+    }
     return ssh
-        .connect({
-            host: nodeConfig.host,
-            username: nodeConfig.username,
-            password: nodeConfig.password,
-            keepaliveInterval: 10000
-        })
+        .connect(connectionInfo)
         .then(function() {
             nodeConfig.ssh = ssh;
         });
