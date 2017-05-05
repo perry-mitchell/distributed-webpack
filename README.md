@@ -60,6 +60,11 @@ module.exports = {
     webpack: {
         buildCommand: "./node_modules/.bin/webpack",
         buildArgs: []
+    },
+    
+    verify: {
+        outputDirectory: "/home/user/work/project/dist/",
+        filenameRegex: /\.js$/
     }
 
 };
@@ -72,6 +77,15 @@ An array of [node configurations](#node-configurations).
 
 #### webpack
 Webpack-specific configuration (for running on remotes).
+
+#### verify
+An optional verification configuration for post-build.
+
+##### verify.outputDirectory
+Output directory of retrieved scripts/files to verify.
+
+##### verify.filenameRegex
+Optional regular expression of files to check - matches the `output.filename` property from each webpack configuration and verifies only those that match. This is useful for only verifying those assets built remotely.
 
 ### Node configurations
 Nodes are where the work is done, and can be one of two types: `local` or `ssh`.
