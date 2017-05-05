@@ -8,6 +8,8 @@ Much like [parallel-webpack](https://github.com/trivago/parallel-webpack), **dis
 
 This library is designed to allow the execution of webpack configurations on multiple machines and allows, via configuration, the specification of the exact command (and parameters) to execute. This means that tools like parallel-webpack can be used in combination with distributed-webpack to achieve even greater parallelism.
 
+This library is currently **highly experimental** and should be used with caution on production builds.
+
 ## Installation
 This library is a build tool, so you should (in most cases) save it as a dev dependency:
 
