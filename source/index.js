@@ -10,7 +10,7 @@ switch (command) {
     case "build": {
         performBuild()
             .catch(function(err) {
-                console.error(`Failed: ${err.message}`);
+                console.error(err);
                 process.exit(2);
             });
         break;

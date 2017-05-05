@@ -29,8 +29,10 @@
     "copy": "^0.3.0",
     "execa": "^0.6.1",
     "minimist": "^1.2.0",
+    "mkdirp": "^0.5.1",
     "node-ssh": "^4.0.1",
-    "pify": "^2.3.0"
+    "pify": "^2.3.0",
+    "rimraf": "^2.6.1"
   },
   "peerDependencies": {
     "parallel-webpack": "^1.6.1",
