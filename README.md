@@ -18,4 +18,72 @@ This library has webpack has a **peer dependency**, so you should definitely hav
 ## Configuration
 Configuration of distributed-webpack is made by providing a `dist.webpack.config.js` file in the root directory of the project, alongside a `webpack.config.js` file for regular webpack execution. This new config file will house the definitions of the nodes (to perform building) and their weight (how much of the work will be performed on the node).
 
-_To be continued._
+Within the configuration file, you should export a single object:
+
+```javascript
+module.exports = {
+
+    nodes: [
+
+        {
+            nodeType: "local",
+            weight: 50,
+            workingDir: "/home/user/Temp/dist-wp-build",
+            artifacts: [
+                {
+                    remote: "/home/user/Temp/dist-wp-build/dist/*.js",
+                    local: "/home/user/work/project/dist/"
+                }
+            ]
+        }
+
+    ],
+
+    webpack: {
+        buildCommand: "./node_modules/.bin/webpack",
+        buildArgs: []
+    }
+
+};
+```
+
+### Options
+
+#### nodes
+An array of [node configurations](#node-configurations).
+
+#### webpack
+Webpack-specific configuration (for running on remotes).
+
+### Node configurations
+Nodes are where the work is done, and can be one of two types: `local` or `ssh`.
+
+#### node.nodeType
+A **required** field denoting the type of node. Can be either `local` or `ssh`.
+
+#### node.weight
+A **required** integer denoting the amount of work that should be done on this node compared to others. Weights can be in any range, and are compared to one another. For example, if a node has a weight of `100` and another of `10`, the first will get 10 times the work of the second.
+
+#### node.workingDir
+A **required** string holding the _remote_ working directory (where to copy the project to). Must be absolute.
+
+#### node.host
+The IP address or hostname of the remote machine to connect to. Required for `ssh` node types.
+
+#### node.username
+The SSH username to connect to the remote machine. Required for `ssh` node types.
+
+#### node.password
+The SSH password to authenticate the user with on the remote machine. May be required for `ssh` node types.
+
+#### node.artifacts
+An array of built artifacts to be retrieved after building. This is an array of objects that resemble the following:
+
+```javascript
+{
+    remote: "/home/user/Temp/dist-wp-build/dist/*.js",
+    local: "/home/user/work/project/dist/"
+}
+```
+
+Assets matching the `remote` pattern are copied from the remote source into the `local` directory.
