@@ -1,6 +1,8 @@
 # Distributed Webpack
 Run large webpack builds on multiple machines
 
+[![npm version](https://badge.fury.io/js/distributed-webpack.svg)](https://www.npmjs.com/package/distributed-webpack)
+
 ## About
 Much like [parallel-webpack](https://github.com/trivago/parallel-webpack), **distributed-webpack** is designed to make building _multiple_ configurations faster and more efficient. This project was born out of the requirement to build _hundreds_ of configurations (of scripts with sizes between 1-2mb) where tools like parallel-webpack and [happypack](https://github.com/amireh/happypack) where simply not enough (though they help enormously when compared with standard webpack execution).
 
