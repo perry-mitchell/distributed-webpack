@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const assert = require("assert");
 
 const execa = require("execa");
 const copy = require("copy");
@@ -8,6 +9,8 @@ const NodeSSH = require("node-ssh");
 const rimraf = require("rimraf").sync;
 const mkdirp = require("mkdirp").sync;
 const ProgressBar = require("node-progress-bars");
+const timeSpan = require("time-span");
+const fileExists = require("file-exists").sync;
 
 const copyFiles = pify(copy);
 
@@ -19,7 +22,8 @@ const REMOTE_PATH = "PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin
 //  - Install
 //  - Build
 //  - Copy
-const PROGRESS_TOTAL = 4;
+//  - Done
+const PROGRESS_TOTAL = 5;
 
 function archiveProject() {
     const cwd = getCurrentDir();
@@ -51,7 +55,7 @@ function copyRemoteArtifacts(nodeConfig) {
                     copyFiles(artifact.remote, artifact.local)
                 ))
                 .then(function() {
-                    updateProgress(nodeConfig, "Retrieve build artifacts", true);
+                    updateProgress(nodeConfig, "Retrieved artifacts", true);
                 });
         } else if (nodeType === "ssh") {
             const { ssh } = nodeConfig;
@@ -78,7 +82,7 @@ function copyRemoteArtifacts(nodeConfig) {
                         })
                 )))
                 .then(function() {
-                    updateProgress(nodeConfig, "Retrieve build artifacts", true);
+                    updateProgress(nodeConfig, "Retrieved artifacts", true);
                 });
         }
     }
@@ -100,8 +104,9 @@ function disposeOfNodeConfig(nodeConfig) {
     }
 }
 
-function executeConfig(mainConfig, nodeConfig, start, end) {
+function executeConfig(mainConfig, nodeConfig) {
     const name = getNodeConfigName(nodeConfig);
+    const { first: start, last: end } = nodeConfig;
     updateProgress(nodeConfig, `Build project (${start} -> ${end})`);
     const { nodeType, workingDir } = nodeConfig;
     if (nodeType === "local") {
@@ -116,7 +121,7 @@ function executeConfig(mainConfig, nodeConfig, start, end) {
             }))
             .then(() => execa(mainConfig.webpack.buildCommand, mainConfig.webpack.buildArgs, { cwd: workingDir }))
             .then(function() {
-                updateProgress(nodeConfig, "Build project", true);
+                updateProgress(nodeConfig, "Built project", true);
             });
     } else if (nodeType === "ssh") {
         const randNum = Math.floor(Math.random() * 1000);
@@ -141,7 +146,7 @@ function executeConfig(mainConfig, nodeConfig, start, end) {
             ))
             .then(handleRemoteExecResponse)
             .then(function() {
-                updateProgress(nodeConfig, "Build project", true);
+                updateProgress(nodeConfig, "Built project", true);
             })
             .catch(function(err) {
                 removeTempWebpack();
@@ -169,6 +174,12 @@ function getNodeConfigName(nodeConfig) {
     return "";
 }
 
+function getScriptNames() {
+    const cwd = getCurrentDir();
+    return require(path.join(cwd, "./webpack.config.js"))
+        .map(config => config.output.filename);
+}
+
 function getScriptsCount() {
     const cwd = getCurrentDir();
     return require(path.join(cwd, "./webpack.config.js")).length;
@@ -193,7 +204,7 @@ function installPackage(nodeConfig) {
     if (nodeType === "local") {
         return execa("npm", ["install"], { cwd: nodeConfig.workingDir })
             .then(function() {
-                updateProgress(nodeConfig, "Install project", true);
+                updateProgress(nodeConfig, "Installed project", true);
             });
     } else if (nodeType === "ssh") {
         const { ssh } = nodeConfig;
@@ -204,7 +215,7 @@ function installPackage(nodeConfig) {
             )
             .then(handleRemoteExecResponse)
             .then(function() {
-                updateProgress(nodeConfig, "Install project", true);
+                updateProgress(nodeConfig, "Installed project", true);
             });
     }
     throw new Error(`Unknown node type: ${nodeType}`);
@@ -215,11 +226,12 @@ function performBuild() {
     const nodeConfigs = config.nodes;
     const numItems = getScriptsCount();
     const totalWeight = nodeConfigs.reduce((running, next) => running + next.weight, 0);
+    const endTiming = timeSpan();
     let itemsLeft = numItems,
         workNextIndex = 0;
     const configWorkCount = nodeConfigs.map(function(nodeConfig) {
         let percentage = nodeConfig.weight / totalWeight,
-            count = Math.ceil(percentage * itemsLeft);
+            count = Math.ceil(percentage * numItems);
         if (count > itemsLeft) {
             count = itemsLeft
         };
@@ -227,6 +239,15 @@ function performBuild() {
         return count;
     });
     console.log(`Artifacts: ${numItems}`);
+    nodeConfigs.forEach(function(nodeConfig, index) {
+        let count = configWorkCount[index],
+            first = workNextIndex,
+            last = first + count - 1;
+        workNextIndex = first + count;
+        nodeConfig.first = first;
+        nodeConfig.last = last;
+        console.log(`  - ${getNodeConfigName(nodeConfig)} => ${first} -> ${last} (${last - first + 1})`);
+    });
     return archiveProject()
         .then(function() {
             console.log("Building...");
@@ -239,24 +260,21 @@ function performBuild() {
         )
         .then(removeArchive)
         .then(() => Promise
-            .all(nodeConfigs.map(function(nodeConfig, index) {
-                let count = configWorkCount[index],
-                    first = workNextIndex,
-                    last = first + count - 1;
-                workNextIndex = first + count;
-                return executeConfig(config, nodeConfig, first, last)
+            .all(nodeConfigs.map(function(nodeConfig) {
+                return executeConfig(config, nodeConfig)
                     .then(() => copyRemoteArtifacts(nodeConfig))
                     .then(() => disposeOfNodeConfig(nodeConfig))
                     .then(function() {
-                        updateProgress(nodeConfig, "Done");
+                        updateProgress(nodeConfig, "Done", true);
                     });
             }))
         )
+        .then(() => verifyArtifacts(config, nodeConfigs))
         .then(function() {
             nodeConfigs.forEach(function(nodeConfig) {
                 nodeConfig.progressBar.clear();
             });
-            console.log("Done.");
+            console.log(`Done in ${endTiming.sec()} seconds`);
         });
 }
 
@@ -296,7 +314,7 @@ function sendPackage(nodeConfig) {
         return execa("mkdir", ["-p", nodeConfig.workingDir])
             .then(() => execa("unzip", ["-o", path.join(cwd, "./dist.zip"), "-d", nodeConfig.workingDir], { cwd }))
             .then(function() {
-                updateProgress(nodeConfig, "Transfer project", true);
+                updateProgress(nodeConfig, "Transferred project", true);
             });
     } else if (sendType === "ssh") {
         const { ssh } = nodeConfig;
@@ -311,7 +329,7 @@ function sendPackage(nodeConfig) {
                 ["-o", path.join(remoteTemp, "./dist.zip"), "-d", nodeConfig.workingDir]
             ))
             .then(function() {
-                updateProgress(nodeConfig, "Transfer project", true);
+                updateProgress(nodeConfig, "Transferred project", true);
             });
     }
     throw new Error(`Unknown node type: ${sendType}`);
@@ -321,11 +339,37 @@ function updateProgress(nodeConfig, currentTask, bump = false) {
     if (!nodeConfig.progressBar) {
         nodeConfig.progressBar = new ProgressBar({
             schema: "[:bar] (:current/:total :elapseds) :task",
-            total: PROGRESS_TOTAL
+            total: PROGRESS_TOTAL,
+            blank: "░",
+            filled: "▓"
         });
     }
     const tick = bump ? 1 : 0;
     nodeConfig.progressBar.tick(tick, { task: currentTask });
+}
+
+function verifyArtifacts(config, nodeConfigs) {
+    if (config.verify && config.verify.outputDirectory) {
+        const expectedFilenames = getScriptNames();
+        const nonExisting = expectedFilenames
+            .filter(function(filename) {
+                if (config.verify.filenameRegex) {
+                    return config.verify.filenameRegex.test(filename);
+                }
+                return true;
+            })
+            .filter(function(filename) {
+                const fullPath = path.join(config.verify.outputDirectory, filename);
+                return !fileExists(fullPath);
+            });
+        if (nonExisting.length > 0) {
+            console.log("Missing files:");
+            nonExisting.forEach(function(missingFilename) {
+                console.log(`  ${missingFilename}`);
+            });
+            throw new Error(`Verfication failed: ${nonExisting.length} files did not exist after build`);
+        }
+    }
 }
 
 module.exports = {
