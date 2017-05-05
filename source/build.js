@@ -7,11 +7,19 @@ const pify = require("pify");
 const NodeSSH = require("node-ssh");
 const rimraf = require("rimraf").sync;
 const mkdirp = require("mkdirp").sync;
+const ProgressBar = require("node-progress-bars");
 
 const copyFiles = pify(copy);
 
 const FILTER_STDOUT = result => result.stdout;
 const REMOTE_PATH = "PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin";
+
+// Progress items:
+//  - Transfer
+//  - Install
+//  - Build
+//  - Copy
+const PROGRESS_TOTAL = 4;
 
 function archiveProject() {
     const cwd = getCurrentDir();
@@ -32,8 +40,8 @@ function copyExeHelpers(nodeConfig) {
 
 function copyRemoteArtifacts(nodeConfig) {
     const { nodeType, artifacts } = nodeConfig;
+    updateProgress(nodeConfig, "Retrieve build artifacts");
     if (artifacts && artifacts.length > 0) {
-        console.log("Copying build artifacts...");
         artifacts.forEach(function(artifact) {
             mkdirp(artifact.local);
         });
@@ -41,7 +49,10 @@ function copyRemoteArtifacts(nodeConfig) {
             return Promise
                 .all(artifacts.map(artifact =>
                     copyFiles(artifact.remote, artifact.local)
-                ));
+                ))
+                .then(function() {
+                    updateProgress(nodeConfig, "Retrieve build artifacts", true);
+                });
         } else if (nodeType === "ssh") {
             const { ssh } = nodeConfig;
             return copyExeHelpers(nodeConfig)
@@ -66,6 +77,9 @@ function copyRemoteArtifacts(nodeConfig) {
                             return downloadChain;
                         })
                 )))
+                .then(function() {
+                    updateProgress(nodeConfig, "Retrieve build artifacts", true);
+                });
         }
     }
     return Promise.resolve();
@@ -88,7 +102,7 @@ function disposeOfNodeConfig(nodeConfig) {
 
 function executeConfig(mainConfig, nodeConfig, start, end) {
     const name = getNodeConfigName(nodeConfig);
-    console.log(`Building project (${start} -> ${end}) (${name})...`);
+    updateProgress(nodeConfig, `Build project (${start} -> ${end})`);
     const { nodeType, workingDir } = nodeConfig;
     if (nodeType === "local") {
         return execa("mv", ["webpack.config.js", "original.webpack.config.js"], { cwd: workingDir })
@@ -100,7 +114,10 @@ function executeConfig(mainConfig, nodeConfig, start, end) {
                     return resolve();
                 });
             }))
-            .then(() => execa(mainConfig.webpack.buildCommand, mainConfig.webpack.buildArgs, { cwd: workingDir }));
+            .then(() => execa(mainConfig.webpack.buildCommand, mainConfig.webpack.buildArgs, { cwd: workingDir }))
+            .then(function() {
+                updateProgress(nodeConfig, "Build project", true);
+            });
     } else if (nodeType === "ssh") {
         const randNum = Math.floor(Math.random() * 1000);
         const tempWebpackPath = path.resolve(__dirname, `./tmp${randNum}.webpack.config.js`);
@@ -123,6 +140,9 @@ function executeConfig(mainConfig, nodeConfig, start, end) {
                 { cwd: nodeConfig.workingDir }
             ))
             .then(handleRemoteExecResponse)
+            .then(function() {
+                updateProgress(nodeConfig, "Build project", true);
+            })
             .catch(function(err) {
                 removeTempWebpack();
                 throw err;
@@ -167,11 +187,14 @@ function handleRemoteExecResponse(result) {
 
 function installPackage(nodeConfig) {
     const name = getNodeConfigName(nodeConfig);
-    console.log(`Installing project (${name})...`);
+    updateProgress(nodeConfig, "Install project");
     const cwd = getCurrentDir();
     const { nodeType } = nodeConfig;
     if (nodeType === "local") {
-        return execa("npm", ["install"], { cwd: nodeConfig.workingDir });
+        return execa("npm", ["install"], { cwd: nodeConfig.workingDir })
+            .then(function() {
+                updateProgress(nodeConfig, "Install project", true);
+            });
     } else if (nodeType === "ssh") {
         const { ssh } = nodeConfig;
         return ssh
@@ -179,7 +202,10 @@ function installPackage(nodeConfig) {
                 `${REMOTE_PATH} npm install`,
                 { cwd: nodeConfig.workingDir }
             )
-            .then(handleRemoteExecResponse);
+            .then(handleRemoteExecResponse)
+            .then(function() {
+                updateProgress(nodeConfig, "Install project", true);
+            });
     }
     throw new Error(`Unknown node type: ${nodeType}`);
 }
@@ -202,6 +228,9 @@ function performBuild() {
     });
     console.log(`Artifacts: ${numItems}`);
     return archiveProject()
+        .then(function() {
+            console.log("Building...");
+        })
         .then(() => Promise
             .all(nodeConfigs.map(
                 nodeConfig => processConfig(nodeConfig)
@@ -217,10 +246,16 @@ function performBuild() {
                 workNextIndex = first + count;
                 return executeConfig(config, nodeConfig, first, last)
                     .then(() => copyRemoteArtifacts(nodeConfig))
-                    .then(() => disposeOfNodeConfig(nodeConfig));
+                    .then(() => disposeOfNodeConfig(nodeConfig))
+                    .then(function() {
+                        updateProgress(nodeConfig, "Done");
+                    });
             }))
         )
         .then(function() {
+            nodeConfigs.forEach(function(nodeConfig) {
+                nodeConfig.progressBar.clear();
+            });
             console.log("Done.");
         });
 }
@@ -241,7 +276,7 @@ function prepareSSH(nodeConfig) {
 
 function processConfig(nodeConfig) {
     if (nodeConfig.nodeType === "ssh") {
-        console.log(`Preparing SSH connection to ${nodeConfig.host}...`);
+        updateProgress(nodeConfig, "Prepare SSH connection");
         return prepareSSH(nodeConfig)
             .then(() => sendPackage(nodeConfig));
     }
@@ -253,13 +288,16 @@ function removeArchive() {
 }
 
 function sendPackage(nodeConfig) {
-    console.log("Transferring project...");
+    updateProgress(nodeConfig, "Transfer project");
     const cwd = getCurrentDir();
     const remoteTemp = getTempDirectory(nodeConfig);
     const sendType = nodeConfig.nodeType;
     if (sendType === "local") {
         return execa("mkdir", ["-p", nodeConfig.workingDir])
             .then(() => execa("unzip", ["-o", path.join(cwd, "./dist.zip"), "-d", nodeConfig.workingDir], { cwd }))
+            .then(function() {
+                updateProgress(nodeConfig, "Transfer project", true);
+            });
     } else if (sendType === "ssh") {
         const { ssh } = nodeConfig;
         return ssh
@@ -271,9 +309,23 @@ function sendPackage(nodeConfig) {
             .then(() => ssh.exec(
                 "unzip",
                 ["-o", path.join(remoteTemp, "./dist.zip"), "-d", nodeConfig.workingDir]
-            ));
+            ))
+            .then(function() {
+                updateProgress(nodeConfig, "Transfer project", true);
+            });
     }
     throw new Error(`Unknown node type: ${sendType}`);
+}
+
+function updateProgress(nodeConfig, currentTask, bump = false) {
+    if (!nodeConfig.progressBar) {
+        nodeConfig.progressBar = new ProgressBar({
+            schema: "[:bar] (:current/:total :elapseds) :task",
+            total: PROGRESS_TOTAL
+        });
+    }
+    const tick = bump ? 1 : 0;
+    nodeConfig.progressBar.tick(tick, { task: currentTask });
 }
 
 module.exports = {
