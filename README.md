@@ -19,6 +19,18 @@ npm install distributed-webpack --save-dev
 
 This library has webpack has a **peer dependency**, so you should definitely have that already installed. distributed-webpack reinstalls all modules specified in `package.json` on the target machines, so webpack (and any other required build tools) should be specified in `package.json` for it to be installed remotely.
 
+## Usage
+distributed-webpack provides an executable called `distwp`, which is available in `./node_modules/.bin/`. It can be used in npm scripts to easily initiate building:
+
+```json
+{
+    "name": "myProject",
+    "scripts": {
+        "build": "distwp build"
+    }
+}
+```
+
 ## Configuration
 Configuration of distributed-webpack is made by providing a `dist.webpack.config.js` file in the root directory of the project, alongside a `webpack.config.js` file for regular webpack execution. This new config file will house the definitions of the nodes (to perform building) and their weight (how much of the work will be performed on the node).
 
