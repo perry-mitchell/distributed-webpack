@@ -1,0 +1,45 @@
+{
+  "name": "distributed-webpack",
+  "version": "0.1.0",
+  "description": "Run large webpack builds on multiple machines",
+  "main": "source/index.js",
+  "bin": {
+    "distwp": "source/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/perry-mitchell/distributed-webpack.git"
+  },
+  "keywords": [
+    "webpack",
+    "distributed",
+    "parallel",
+    "build"
+  ],
+  "author": "Perry Mitchell <perry@perrymitchell.net>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/perry-mitchell/distributed-webpack/issues"
+  },
+  "homepage": "https://github.com/perry-mitchell/distributed-webpack#readme",
+  "dependencies": {
+    "copy": "^0.3.0",
+    "execa": "^0.6.1",
+    "minimist": "^1.2.0",
+    "mkdirp": "^0.5.1",
+    "node-progress-bars": "^1.0.5",
+    "node-ssh": "^4.0.1",
+    "pify": "^2.3.0",
+    "rimraf": "^2.6.1"
+  },
+  "peerDependencies": {
+    "parallel-webpack": "^1.6.1",
+    "webpack": "^2.2.0"
+  },
+  "devDependencies": {
+    "webpack": "^2.2.1"
+  }
+}
