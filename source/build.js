@@ -363,10 +363,10 @@ function sendPackage(nodeConfig) {
 }
 
 function updateProgress(nodeConfig, count) {
-    const tick = nodeConfig.modulesCount - nodeConfig.modulesProgress;
+    const tick = count - nodeConfig.modulesProgress;
     if (tick > 0) {
+        nodeConfig.modulesProgress = count;
         nodeConfig.progressBar.tick(tick, nodeConfig.lastProgressProps);
-        nodeConfig.modulesProgress = nodeConfig.modulesCount;
     }
 }
 
