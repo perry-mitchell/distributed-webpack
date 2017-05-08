@@ -11,19 +11,14 @@ const mkdirp = require("mkdirp").sync;
 const ProgressBar = require("node-progress-bars");
 const timeSpan = require("time-span");
 const fileExists = require("file-exists").sync;
+const getIPAddress = require("internal-ip").v4;
 
+const ProgressServer = require("./ProgressServer.js");
 const copyFiles = pify(copy);
 
+const DEFAULT_PROGRESS_LISTEN_PORT = 9955;
 const FILTER_STDOUT = result => result.stdout;
 const REMOTE_PATH = "PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin";
-
-// Progress items:
-//  - Transfer
-//  - Install
-//  - Build
-//  - Copy
-//  - Done
-const PROGRESS_TOTAL = 5;
 
 function archiveProject() {
     const cwd = getCurrentDir();
@@ -44,7 +39,7 @@ function copyExeHelpers(nodeConfig) {
 
 function copyRemoteArtifacts(nodeConfig) {
     const { nodeType, artifacts } = nodeConfig;
-    updateProgress(nodeConfig, "Retrieve build artifacts");
+    updateTask(nodeConfig, "Retrieve build artifacts");
     if (artifacts && artifacts.length > 0) {
         artifacts.forEach(function(artifact) {
             mkdirp(artifact.local);
@@ -55,7 +50,7 @@ function copyRemoteArtifacts(nodeConfig) {
                     copyFiles(artifact.remote, artifact.local)
                 ))
                 .then(function() {
-                    updateProgress(nodeConfig, "Retrieved artifacts", true);
+                    updateTask(nodeConfig, "Retrieved artifacts");
                 });
         } else if (nodeType === "ssh") {
             const { ssh } = nodeConfig;
@@ -82,7 +77,7 @@ function copyRemoteArtifacts(nodeConfig) {
                         })
                 )))
                 .then(function() {
-                    updateProgress(nodeConfig, "Retrieved artifacts", true);
+                    updateTask(nodeConfig, "Retrieved artifacts");
                 });
         }
     }
@@ -107,9 +102,13 @@ function disposeOfNodeConfig(nodeConfig) {
 function executeConfig(mainConfig, nodeConfig) {
     const name = getNodeConfigName(nodeConfig);
     const { first: start, last: end } = nodeConfig;
-    updateProgress(nodeConfig, `Build project (${start} -> ${end})`);
+    updateTask(nodeConfig, `Build project (${start} -> ${end})`);
     const { nodeType, workingDir } = nodeConfig;
     if (nodeType === "local") {
+        fs.writeFileSync(
+            path.join(workingDir, "dist-node.info"),
+            [nodeConfig.nodeID, getIPAddress(), DEFAULT_PROGRESS_LISTEN_PORT].join(",")
+        );
         return execa("mv", ["webpack.config.js", "original.webpack.config.js"], { cwd: workingDir })
             .then(() => new Promise(function(resolve, reject) {
                 fs.writeFile(path.join(workingDir, "webpack.config.js"), createWebpackText(start, end), function(err) {
@@ -121,12 +120,17 @@ function executeConfig(mainConfig, nodeConfig) {
             }))
             .then(() => execa(mainConfig.webpack.buildCommand, mainConfig.webpack.buildArgs, { cwd: workingDir }))
             .then(function() {
-                updateProgress(nodeConfig, "Built project", true);
+                updateTask(nodeConfig, "Built project");
             });
     } else if (nodeType === "ssh") {
         const randNum = Math.floor(Math.random() * 1000);
         const tempWebpackPath = path.resolve(__dirname, `./tmp${randNum}.webpack.config.js`);
+        const tempNodeInfoPath = path.resolve(__dirname, `./tmp${randNum}.dist-node.info`);
         fs.writeFileSync(tempWebpackPath, createWebpackText(start, end));
+        fs.writeFileSync(
+            tempNodeInfoPath,
+            [nodeConfig.nodeID, getIPAddress(), DEFAULT_PROGRESS_LISTEN_PORT].join(",")
+        );
         const removeTempWebpack = () => rimraf(tempWebpackPath);
         const { ssh } = nodeConfig;
         return ssh
@@ -139,6 +143,10 @@ function executeConfig(mainConfig, nodeConfig) {
                 tempWebpackPath,
                 path.join(workingDir, "webpack.config.js")
             ))
+            .then(() => ssh.putFile(
+                tempNodeInfoPath,
+                path.join(workingDir, "dist-node.info")
+            ))
             .then(() => removeTempWebpack())
             .then(() => ssh.execCommand(
                 `${REMOTE_PATH} ${mainConfig.webpack.buildCommand} ${mainConfig.webpack.buildArgs.join(" ")}`,
@@ -146,7 +154,7 @@ function executeConfig(mainConfig, nodeConfig) {
             ))
             .then(handleRemoteExecResponse)
             .then(function() {
-                updateProgress(nodeConfig, "Built project", true);
+                updateTask(nodeConfig, "Built project");
             })
             .catch(function(err) {
                 removeTempWebpack();
@@ -198,13 +206,13 @@ function handleRemoteExecResponse(result) {
 
 function installPackage(nodeConfig) {
     const name = getNodeConfigName(nodeConfig);
-    updateProgress(nodeConfig, "Install project");
+    updateTask(nodeConfig, "Install project");
     const cwd = getCurrentDir();
     const { nodeType } = nodeConfig;
     if (nodeType === "local") {
         return execa("npm", ["install"], { cwd: nodeConfig.workingDir })
             .then(function() {
-                updateProgress(nodeConfig, "Installed project", true);
+                updateTask(nodeConfig, "Installed project");
             });
     } else if (nodeType === "ssh") {
         const { ssh } = nodeConfig;
@@ -215,13 +223,14 @@ function installPackage(nodeConfig) {
             )
             .then(handleRemoteExecResponse)
             .then(function() {
-                updateProgress(nodeConfig, "Installed project", true);
+                updateTask(nodeConfig, "Installed project");
             });
     }
     throw new Error(`Unknown node type: ${nodeType}`);
 }
 
 function performBuild() {
+    global.__distWebpack__ = true;
     const config = getConfig();
     const nodeConfigs = config.nodes;
     const numItems = getScriptsCount();
@@ -242,11 +251,23 @@ function performBuild() {
     nodeConfigs.forEach(function(nodeConfig, index) {
         let count = configWorkCount[index],
             first = workNextIndex,
-            last = first + count - 1;
+            last = first + count - 1,
+            total = last - first + 1;
         workNextIndex = first + count;
         nodeConfig.first = first;
         nodeConfig.last = last;
-        console.log(`  - ${getNodeConfigName(nodeConfig)} => ${first} -> ${last} (${last - first + 1})`);
+        nodeConfig.modulesProgress = 0;
+        nodeConfig.modulesCount = total;
+        nodeConfig.nodeID = `node:${first}-${last}`;
+        console.log(`  - ${getNodeConfigName(nodeConfig)} => ${first} -> ${last} (${total})`);
+    });
+    config.progressServer = new ProgressServer(DEFAULT_PROGRESS_LISTEN_PORT);
+    config.progressServer.on("moduleComplete", packet => {
+        const { nodeID, count } = packet;
+        const nodeConfig = nodeConfigs.find(configItem => configItem.nodeID === nodeID);
+        if (nodeConfig) {
+            updateProgress(nodeConfig, count);
+        }
     });
     return archiveProject()
         .then(function() {
@@ -265,7 +286,7 @@ function performBuild() {
                     .then(() => copyRemoteArtifacts(nodeConfig))
                     .then(() => disposeOfNodeConfig(nodeConfig))
                     .then(function() {
-                        updateProgress(nodeConfig, "Done", true);
+                        updateTask(nodeConfig, "Done");
                     });
             }))
         )
@@ -274,6 +295,7 @@ function performBuild() {
             nodeConfigs.forEach(function(nodeConfig) {
                 nodeConfig.progressBar.clear();
             });
+            config.progressServer.close();
             console.log(`Done in ${endTiming.sec()} seconds`);
         });
 }
@@ -299,7 +321,7 @@ function prepareSSH(nodeConfig) {
 
 function processConfig(nodeConfig) {
     if (nodeConfig.nodeType === "ssh") {
-        updateProgress(nodeConfig, "Prepare SSH connection");
+        updateTask(nodeConfig, "Prepare SSH connection");
         return prepareSSH(nodeConfig)
             .then(() => sendPackage(nodeConfig));
     }
@@ -311,7 +333,7 @@ function removeArchive() {
 }
 
 function sendPackage(nodeConfig) {
-    updateProgress(nodeConfig, "Transfer project");
+    updateTask(nodeConfig, "Transfer project");
     const cwd = getCurrentDir();
     const remoteTemp = getTempDirectory(nodeConfig);
     const sendType = nodeConfig.nodeType;
@@ -319,7 +341,7 @@ function sendPackage(nodeConfig) {
         return execa("mkdir", ["-p", nodeConfig.workingDir])
             .then(() => execa("unzip", ["-o", path.join(cwd, "./dist.zip"), "-d", nodeConfig.workingDir], { cwd }))
             .then(function() {
-                updateProgress(nodeConfig, "Transferred project", true);
+                updateTask(nodeConfig, "Transferred project");
             });
     } else if (sendType === "ssh") {
         const { ssh } = nodeConfig;
@@ -334,23 +356,31 @@ function sendPackage(nodeConfig) {
                 ["-o", path.join(remoteTemp, "./dist.zip"), "-d", nodeConfig.workingDir]
             ))
             .then(function() {
-                updateProgress(nodeConfig, "Transferred project", true);
+                updateTask(nodeConfig, "Transferred project");
             });
     }
     throw new Error(`Unknown node type: ${sendType}`);
 }
 
-function updateProgress(nodeConfig, currentTask, bump = false) {
+function updateProgress(nodeConfig, count) {
+    const tick = nodeConfig.modulesCount - nodeConfig.modulesProgress;
+    if (tick > 0) {
+        nodeConfig.progressBar.tick(tick, nodeConfig.lastProgressProps);
+        nodeConfig.modulesProgress = nodeConfig.modulesCount;
+    }
+}
+
+function updateTask(nodeConfig, currentTask) {
     if (!nodeConfig.progressBar) {
         nodeConfig.progressBar = new ProgressBar({
             schema: "[:bar] (:current/:total :elapseds) :task",
-            total: PROGRESS_TOTAL,
+            total: nodeConfig.modulesCount,
             blank: "░",
             filled: "▓"
         });
     }
-    const tick = bump ? 1 : 0;
-    nodeConfig.progressBar.tick(tick, { task: currentTask });
+    nodeConfig.lastProgressProps = { task: currentTask };
+    nodeConfig.progressBar.tick(0, nodeConfig.lastProgressProps);
 }
 
 function verifyArtifacts(config, nodeConfigs) {

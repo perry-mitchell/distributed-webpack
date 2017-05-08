@@ -27,15 +27,18 @@
   "homepage": "https://github.com/perry-mitchell/distributed-webpack#readme",
   "dependencies": {
     "copy": "^0.3.0",
+    "events": "^1.1.1",
     "execa": "^0.6.1",
     "file-exists": "^3.0.2",
+    "internal-ip": "^1.2.0",
     "minimist": "^1.2.0",
     "mkdirp": "^0.5.1",
     "node-progress-bars": "^1.0.5",
     "node-ssh": "^4.0.1",
     "pify": "^2.3.0",
     "rimraf": "^2.6.1",
-    "time-span": "^1.0.0"
+    "time-span": "^1.0.0",
+    "websocket": "^1.0.24"
   },
   "peerDependencies": {
     "webpack": "2.x"
